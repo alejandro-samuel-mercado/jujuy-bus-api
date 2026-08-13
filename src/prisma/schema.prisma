@@ -1,0 +1,140 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  nombre    String
+  password  String
+  foto      String?
+  creadoEn  DateTime  @default(now())
+  mensajes  Mensaje[]
+  resenas   Resena[]
+  imagenes  ImagenLinea[]
+  horarios  HorarioRecorrido[]
+
+  @@map("usuarios")
+}
+
+model Empresa {
+  id       String  @id @default(uuid())
+  nombre   String  @unique
+  color    String  @default("#6C63FF")
+  logo     String?
+  lineas   Linea[]
+
+  @@map("empresas")
+}
+
+model Linea {
+  id              String         @id @default(uuid())
+  numero          String
+  nombre          String?
+  fotoPortada     String?
+  ciudades        String[]       @default([])
+  barrios         String[]       @default([])
+  recorridoPuntos String[]       @default([])
+  empresaId       String
+  empresa         Empresa        @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  chatGrupo       ChatGrupo?
+  resenas         Resena[]
+  imagenes        ImagenLinea[]
+  horarios        HorarioRecorrido[]
+  recorridoGPS    RecorridoGPS?
+  historial       HistorialRecorrido[]
+
+  @@unique([numero, empresaId])
+  @@map("lineas")
+}
+
+model RecorridoGPS {
+  id              String   @id @default(uuid())
+  lineaId         String   @unique
+  linea           Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
+  puntos          Json     @default("[]") // Array de { lat: Float, lng: Float }
+  paradas         Json     @default("[]") // Array de { lat: Float, lng: Float }
+  actualizadoEn   DateTime @updatedAt
+  actualizadoPor  String?  // userId del último que editó
+
+  @@map("recorridos_gps")
+}
+
+model HistorialRecorrido {
+  id              String   @id @default(uuid())
+  lineaId         String
+  linea           Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
+  puntos          Json     @default("[]")
+  paradas         Json     @default("[]")
+  actualizadoPor  String?  // userId del que guardó esta versión
+  creadoEn        DateTime @default(now())
+
+  @@map("historial_recorridos")
+}
+
+model ChatGrupo {
+  id        String    @id @default(uuid())
+  lineaId   String    @unique
+  linea     Linea     @relation(fields: [lineaId], references: [id], onDelete: Cascade)
+  mensajes  Mensaje[]
+
+  @@map("chat_grupos")
+}
+
+model Mensaje {
+  id          String    @id @default(uuid())
+  texto       String
+  usuarioId   String
+  usuario     Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  chatGrupoId String
+  chatGrupo   ChatGrupo @relation(fields: [chatGrupoId], references: [id], onDelete: Cascade)
+  reportado   Boolean   @default(false)
+  creadoEn    DateTime  @default(now())
+
+  @@map("mensajes")
+}
+
+model Resena {
+  id         String   @id @default(uuid())
+  rating     Int
+  comentario String?
+  usuarioId  String
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  lineaId    String
+  linea      Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
+  creadoEn   DateTime @default(now())
+
+  @@map("resenas")
+}
+
+model ImagenLinea {
+  id         String   @id @default(uuid())
+  url        String
+  usuarioId  String
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  lineaId    String
+  linea      Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
+  creadoEn   DateTime @default(now())
+
+  @@map("imagenes_linea")
+}
+
+model HorarioRecorrido {
+  id         String   @id @default(uuid())
+  lugar      String
+  hora       String
+  usuarioId  String
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  lineaId    String
+  linea      Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
+
+  @@map("horarios_recorrido")
+}
