@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'jujuy-bus-api',
       script: './dist/index.js',
-      instances: 'max', // Utilizar todos los núcleos disponibles (útil para balanceo de carga)
+      instances: 1, // Cambiado a 1 temporalmente porque Socket.io requiere Redis para funcionar en múltiples núcleos
       exec_mode: 'cluster',
       autorestart: true,
       watch: false,
