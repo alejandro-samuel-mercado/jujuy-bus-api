@@ -52,10 +52,10 @@ app.get('/health', (req, res) => {
 });
 
 // Iniciar servidor
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 5055;
 if (process.env.NODE_ENV !== 'test') {
-  server.listen(PORT, () => {
-    console.log(`🚀 Servidor JUJUY BUS corriendo en http://localhost:${PORT}`);
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Servidor JUJUY BUS corriendo en http://0.0.0.0:${PORT}`);
   });
 }
 
