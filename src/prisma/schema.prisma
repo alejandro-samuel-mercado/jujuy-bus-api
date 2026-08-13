@@ -11,16 +11,22 @@ datasource db {
 }
 
 model Usuario {
-  id        String    @id @default(uuid())
-  email     String    @unique
-  nombre    String
-  password  String
-  foto      String?
-  creadoEn  DateTime  @default(now())
-  mensajes  Mensaje[]
-  resenas   Resena[]
-  imagenes  ImagenLinea[]
-  horarios  HorarioRecorrido[]
+  id               String           @id @default(uuid())
+  email            String           @unique
+  nombre           String
+  password         String
+  foto             String?
+  creadoEn         DateTime         @default(now())
+  mensajes         Mensaje[]
+  resenas          Resena[]
+  imagenesSubidas  ImagenLinea[]
+  horarios         HorarioRecorrido[]
+  paradasFavoritas ParadaFavorita[]
+  reportesMensaje  ReporteMensaje[]
+  reportesNoticia  ReporteNoticia[]
+  noticias         Noticia[]
+  likesNoticias    LikeNoticia[]
+  comentariosNoticia ComentarioNoticia[]
 
   @@map("usuarios")
 }
@@ -49,6 +55,7 @@ model Linea {
   resenas         Resena[]
   imagenes        ImagenLinea[]
   horarios        HorarioRecorrido[]
+  paradas         Parada[]
   recorridoGPS    RecorridoGPS?
   historial       HistorialRecorrido[]
 
@@ -97,9 +104,24 @@ model Mensaje {
   chatGrupoId String
   chatGrupo   ChatGrupo @relation(fields: [chatGrupoId], references: [id], onDelete: Cascade)
   reportado   Boolean   @default(false)
+  replyToId   String?
+  replyTo     Mensaje?  @relation("ReplyTo", fields: [replyToId], references: [id])
+  replies     Mensaje[] @relation("ReplyTo")
+  reportes    ReporteMensaje[]
   creadoEn    DateTime  @default(now())
 
   @@map("mensajes")
+}
+
+model ReporteMensaje {
+  id        String   @id @default(uuid())
+  mensajeId String
+  mensaje   Mensaje  @relation(fields: [mensajeId], references: [id], onDelete: Cascade)
+  usuarioId String
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  creadoEn  DateTime @default(now())
+
+  @@map("reportes_mensaje")
 }
 
 model Resena {
@@ -129,12 +151,89 @@ model ImagenLinea {
 
 model HorarioRecorrido {
   id         String   @id @default(uuid())
-  lugar      String
   hora       String
   usuarioId  String
   usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  paradaId   String
+  parada     Parada   @relation(fields: [paradaId], references: [id], onDelete: Cascade)
   lineaId    String
   linea      Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
 
   @@map("horarios_recorrido")
+}
+
+model Noticia {
+  id         String   @id @default(uuid())
+  titulo     String?
+  contenido  String
+  imagenUrl  String?
+  urlExterna String?
+  usuarioId  String?
+  usuario    Usuario?  @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  likes      LikeNoticia[]
+  comentarios ComentarioNoticia[]
+  reportes   ReporteNoticia[]
+  creadoEn   DateTime @default(now())
+
+  @@map("noticias")
+}
+
+model ReporteNoticia {
+  id        String   @id @default(uuid())
+  usuarioId String
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  noticiaId String
+  noticia   Noticia  @relation(fields: [noticiaId], references: [id], onDelete: Cascade)
+  creadoEn  DateTime @default(now())
+
+  @@map("reportes_noticia")
+}
+
+model LikeNoticia {
+  id        String   @id @default(uuid())
+  usuarioId String
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  noticiaId String
+  noticia   Noticia  @relation(fields: [noticiaId], references: [id], onDelete: Cascade)
+  creadoEn  DateTime @default(now())
+
+  @@unique([usuarioId, noticiaId])
+  @@map("likes_noticia")
+}
+
+model ComentarioNoticia {
+  id        String   @id @default(uuid())
+  contenido String
+  usuarioId String
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  noticiaId String
+  noticia   Noticia  @relation(fields: [noticiaId], references: [id], onDelete: Cascade)
+  creadoEn  DateTime @default(now())
+
+  @@map("comentarios_noticia")
+}
+
+model Parada {
+  id          String   @id @default(uuid())
+  lat         Float
+  lng         Float
+  nombre      String
+  lineaId     String
+  linea       Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
+  favoritos   ParadaFavorita[]
+  horarios    HorarioRecorrido[]
+
+  @@map("paradas")
+}
+
+model ParadaFavorita {
+  id        String   @id @default(uuid())
+  usuarioId String
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  paradaId  String
+  parada    Parada   @relation(fields: [paradaId], references: [id], onDelete: Cascade)
+  creadoEn  DateTime @default(now())
+
+  @@unique([usuarioId, paradaId])
+  @@map("paradas_favoritas")
 }

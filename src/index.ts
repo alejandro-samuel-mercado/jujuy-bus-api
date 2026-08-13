@@ -6,7 +6,9 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import empresasRoutes from './routes/empresas';
 import lineasRoutes from './routes/lineas';
+import usuariosRoutes from './routes/usuarios';
 import uploadRoutes from './routes/upload';
+import noticiasRoutes from './routes/noticias';
 import { setupChatSockets } from './sockets/chat';
 import { setupGpsSockets } from './sockets/gps';
 import path from 'path';
@@ -31,9 +33,11 @@ app.use(express.json());
 
 // Rutas API
 app.use('/auth', authRoutes);
+app.use('/usuarios', usuariosRoutes);
 app.use('/empresas', empresasRoutes);
 app.use('/lineas', lineasRoutes);
 app.use('/upload', uploadRoutes);
+app.use('/noticias', noticiasRoutes);
 
 // Servir archivos estáticos de subidas
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));

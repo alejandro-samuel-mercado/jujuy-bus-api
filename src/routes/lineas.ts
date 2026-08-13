@@ -108,9 +108,11 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response): Promise<
         chatGrupo: {
           include: {
             mensajes: {
-              include: { usuario: { select: { id: true, nombre: true, foto: true } } },
-              orderBy: { creadoEn: 'desc' },
-              take: 50 // Traer los últimos 50 mensajes
+              include: { 
+                usuario: { select: { id: true, nombre: true, foto: true } },
+                replyTo: { select: { id: true, texto: true, usuario: { select: { nombre: true } } } }
+              },
+              orderBy: { creadoEn: 'asc' }
             }
           }
         },
@@ -124,6 +126,9 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response): Promise<
         },
         horarios: {
           include: { usuario: { select: { id: true, nombre: true } } }
+        },
+        paradas: {
+          include: { horarios: true }
         }
       }
     });
@@ -144,7 +149,7 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response): Promise<
 router.post('/:id/mensajes', authMiddleware, async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { texto } = req.body;
+    const { texto, replyToId } = req.body;
     // @ts-ignore
     const usuarioId = req.usuario?.id; // Asumiendo que el middleware inyecta req.user
 
@@ -167,10 +172,12 @@ router.post('/:id/mensajes', authMiddleware, async (req: Request, res: Response)
       data: {
         texto: texto.trim(),
         usuarioId,
-        chatGrupoId: linea.chatGrupo.id
+        chatGrupoId: linea.chatGrupo.id,
+        replyToId: replyToId || null
       },
       include: {
-        usuario: { select: { id: true, nombre: true, foto: true } }
+        usuario: { select: { id: true, nombre: true, foto: true } },
+        replyTo: { select: { id: true, texto: true, usuario: { select: { nombre: true } } } }
       }
     });
 
@@ -208,10 +215,57 @@ router.delete('/:id/mensajes/:mensajeId', authMiddleware, async (req: Request, r
       where: { id: mensajeId }
     });
 
-    res.json({ message: 'Mensaje borrado con éxito' });
-  } catch (error: any) {
+    res.status(200).json({ success: true });
+  } catch (error) {
     console.error('Error al borrar mensaje:', error);
-    res.status(500).json({ error: 'Error interno', details: error.message });
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// POST /lineas/:id/mensajes/:mensajeId/reportar
+router.post('/:id/mensajes/:mensajeId/reportar', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, mensajeId } = req.params;
+    // @ts-ignore
+    const usuarioId = req.usuario?.id;
+
+    // Verificar que el mensaje existe y pertenece a la línea
+    const mensaje = await prisma.mensaje.findUnique({
+      where: { id: mensajeId },
+      include: { chatGrupo: true }
+    });
+
+    if (!mensaje || mensaje.chatGrupo.lineaId !== id) {
+      res.status(404).json({ error: 'Mensaje no encontrado' });
+      return;
+    }
+
+    // Remover comprobación de si ya reportó a petición del usuario
+
+    // Crear el reporte
+    await prisma.reporteMensaje.create({
+      data: {
+        mensajeId,
+        usuarioId
+      }
+    });
+
+    // Contar reportes
+    const conteo = await prisma.reporteMensaje.count({
+      where: { mensajeId }
+    });
+
+    if (conteo >= 5) {
+      // Borrar mensaje si llega a 5
+      await prisma.mensaje.delete({ where: { id: mensajeId } });
+      res.json({ success: true, message: 'Mensaje borrado por múltiples reportes' });
+      return;
+    }
+
+    res.json({ success: true, message: 'Mensaje reportado exitosamente' });
+  } catch (error) {
+    console.error('Error al reportar mensaje:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -269,6 +323,25 @@ router.post('/:id/imagenes', authMiddleware, async (req: Request, res: Response)
   }
 });
 
+// DELETE /lineas/:id/imagenes/:imageId - Eliminar una foto de la galería
+router.delete('/:id/imagenes/:imageId', async (req: Request, res: Response): Promise<void> => {
+  const { id, imageId } = req.params;
+  try {
+    const imagen = await prisma.imagenLinea.findUnique({ where: { id: imageId } });
+    if (!imagen) {
+      res.status(404).json({ error: 'Imagen no encontrada' });
+      return;
+    }
+    
+    // Cualquiera puede borrar, según los requisitos
+    await prisma.imagenLinea.delete({ where: { id: imageId } });
+    res.json({ message: 'Imagen eliminada correctamente' });
+  } catch (error) {
+    console.error('Error al eliminar imagen:', error);
+    res.status(500).json({ error: 'Error al eliminar imagen' });
+  }
+});
+
 // PUT /lineas/:id — editar línea
 router.put('/:id', authMiddleware, async (req: Request, res: Response): Promise<void> => {
   try {
@@ -321,17 +394,31 @@ router.put('/:id', authMiddleware, async (req: Request, res: Response): Promise<
 });
 
 // GET /lineas/:id/recorrido — obtener el recorrido GPS trazado en el mapa
-router.get('/:id/recorrido', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+router.get('/:id/recorrido', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const recorrido = await prisma.recorridoGPS.findUnique({
-      where: { lineaId: id },
+      where: { lineaId: id }
     });
-    // Si no existe todavía, devolvemos puntos vacíos
+
+    const linea = await prisma.linea.findUnique({
+      where: { id },
+      include: { paradas: true }
+    });
+
+    if (!recorrido && !linea) {
+      res.json({ puntos: [], paradas: [] });
+      return;
+    }
+
+    let parsedPuntos = [];
+    if (recorrido && recorrido.puntos) {
+      parsedPuntos = typeof recorrido.puntos === 'string' ? JSON.parse(recorrido.puntos as string) : recorrido.puntos;
+    }
+
     res.json({ 
-      lineaId: id, 
-      puntos: recorrido?.puntos ?? [], 
-      paradas: recorrido?.paradas ?? [],
+      puntos: parsedPuntos, 
+      paradas: linea ? linea.paradas : [],
       actualizadoEn: recorrido?.actualizadoEn ?? null 
     });
   } catch (error) {
@@ -390,6 +477,47 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
     const recorridoActual = await prisma.recorridoGPS.findUnique({ where: { lineaId: id } });
     const puntosCambiaron = !recorridoActual || JSON.stringify(recorridoActual.puntos) !== JSON.stringify(puntos);
 
+    // --- Sincronizar paradas con la tabla Parada ---
+    // Obtener paradas existentes en DB
+    const paradasDB = await prisma.parada.findMany({ where: { lineaId: id } });
+    
+    // Convertir a mapa para búsqueda rápida
+    const paradasDBMap = new Map(paradasDB.map(p => [p.id, p]));
+    const paradasMantenidas = new Set<string>();
+
+    for (let i = 0; i < paradasSeguras.length; i++) {
+      const p = paradasSeguras[i];
+      if (p.id && paradasDBMap.has(p.id)) {
+        // Actualizar parada existente
+        await prisma.parada.update({
+          where: { id: p.id },
+          data: { lat: p.lat, lng: p.lng, nombre: p.nombre || `Parada ${i + 1}` }
+        });
+        paradasMantenidas.add(p.id);
+      } else {
+        // Crear nueva parada
+        const nuevaParada = await prisma.parada.create({
+          data: {
+            lat: p.lat,
+            lng: p.lng,
+            nombre: p.nombre || `Parada ${i + 1}`,
+            lineaId: id
+          }
+        });
+        // Asignar el nuevo ID generado a la estructura JSON que se guardará
+        paradasSeguras[i].id = nuevaParada.id;
+        paradasMantenidas.add(nuevaParada.id);
+      }
+    }
+
+    // Borrar las paradas que ya no están
+    for (const p of paradasDB) {
+      if (!paradasMantenidas.has(p.id)) {
+        await prisma.parada.delete({ where: { id: p.id } });
+      }
+    }
+    // --- Fin de sincronización ---
+
     // Upsert del recorrido GPS (coordenadas)
     const recorrido = await prisma.recorridoGPS.upsert({
       where: { lineaId: id },
@@ -429,6 +557,60 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
   } catch (error) {
     console.error('Error al guardar recorrido GPS:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /lineas/:id/paradas/:paradaId/horarios
+router.get('/:id/paradas/:paradaId/horarios', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { paradaId } = req.params;
+    const horarios = await prisma.horarioRecorrido.findMany({
+      where: { paradaId },
+      include: { usuario: { select: { nombre: true } } },
+      orderBy: { hora: 'asc' }
+    });
+    res.json(horarios);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// POST /lineas/:id/paradas/:paradaId/horarios
+router.post('/:id/paradas/:paradaId/horarios', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, paradaId } = req.params;
+    const { hora } = req.body;
+    // @ts-ignore
+    const usuarioId = req.usuario?.id;
+
+    if (!hora) {
+      res.status(400).json({ error: 'Hora requerida' });
+      return;
+    }
+
+    const horario = await prisma.horarioRecorrido.create({
+      data: {
+        hora,
+        usuarioId,
+        paradaId,
+        lineaId: id
+      },
+      include: { usuario: { select: { nombre: true } } }
+    });
+    res.json(horario);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// DELETE /lineas/:id/paradas/:paradaId/horarios/:horarioId
+router.delete('/:id/paradas/:paradaId/horarios/:horarioId', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { horarioId } = req.params;
+    await prisma.horarioRecorrido.delete({ where: { id: horarioId } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
@@ -643,6 +825,137 @@ const autoCompletarZonasLinea = async (lineaId: string, puntos: {lat: number, ln
     console.error('Error actualizando línea tras autocompletado:', error);
   }
 };
+
+// --- RUTAS DE PARADAS ---
+
+// POST /lineas/:id/paradas - Crear parada con nombre por defecto
+router.post('/:id/paradas', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { lat, lng, nombre } = req.body;
+    
+    // Contar cuántas hay para el nombre por defecto
+    const count = await prisma.parada.count({ where: { lineaId: id } });
+    const nombreFinal = nombre || `Parada ${count + 1}`;
+
+    const parada = await prisma.parada.create({
+      data: {
+        lineaId: id,
+        lat,
+        lng,
+        nombre: nombreFinal
+      }
+    });
+    res.status(201).json(parada);
+  } catch (error: any) {
+    console.error('Error creando parada:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// PUT /lineas/:id/paradas/:paradaId - Editar parada (ej. nombre)
+router.put('/:id/paradas/:paradaId', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { paradaId } = req.params;
+    const { nombre, lat, lng } = req.body;
+    
+    const parada = await prisma.parada.update({
+      where: { id: paradaId },
+      data: { nombre, lat, lng }
+    });
+    res.json(parada);
+  } catch (error: any) {
+    console.error('Error editando parada:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// DELETE /lineas/:id/paradas/:paradaId
+router.delete('/:id/paradas/:paradaId', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { paradaId } = req.params;
+    await prisma.parada.delete({ where: { id: paradaId } });
+    res.json({ message: 'Parada eliminada' });
+  } catch (error: any) {
+    console.error('Error borrando parada:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// --- RUTAS DE HORARIOS ---
+
+// GET /lineas/:id/paradas/:paradaId/horarios
+router.get('/:id/paradas/:paradaId/horarios', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { paradaId } = req.params;
+    const horarios = await prisma.horarioRecorrido.findMany({
+      where: { paradaId },
+      include: { usuario: { select: { nombre: true, foto: true } } },
+      orderBy: { hora: 'asc' }
+    });
+    res.json(horarios);
+  } catch (error: any) {
+    console.error('Error obteniendo horarios:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// POST /lineas/:id/paradas/:paradaId/horarios
+router.post('/:id/paradas/:paradaId/horarios', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id, paradaId } = req.params;
+    const { hora } = req.body;
+    // @ts-ignore
+    const usuarioId = req.usuario?.id;
+
+    if (!usuarioId) {
+      res.status(401).json({ error: 'No autorizado' });
+      return;
+    }
+
+    const horario = await prisma.horarioRecorrido.create({
+      data: {
+        hora,
+        usuarioId,
+        paradaId,
+        lineaId: id
+      },
+      include: { usuario: { select: { nombre: true, foto: true } } }
+    });
+    res.status(201).json(horario);
+  } catch (error: any) {
+    console.error('Error creando horario:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// DELETE /lineas/:id/horarios/:horarioId
+router.delete('/:id/horarios/:horarioId', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { horarioId } = req.params;
+    // @ts-ignore
+    const usuarioId = req.usuario?.id;
+    // @ts-ignore
+    const esAdmin = req.usuario?.rol === 'ADMIN';
+
+    const horario = await prisma.horarioRecorrido.findUnique({ where: { id: horarioId } });
+    if (!horario) {
+      res.status(404).json({ error: 'Horario no encontrado' });
+      return;
+    }
+
+    if (horario.usuarioId !== usuarioId && !esAdmin) {
+      res.status(403).json({ error: 'No autorizado' });
+      return;
+    }
+
+    await prisma.horarioRecorrido.delete({ where: { id: horarioId } });
+    res.json({ message: 'Horario borrado' });
+  } catch (error: any) {
+    console.error('Error borrando horario:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 export default router;
 
