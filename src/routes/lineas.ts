@@ -565,12 +565,10 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
     });
 
     if (puntosCambiaron) {
-      // Limpiar instantáneamente el perfil de la línea para reflejar que se está recalculando
+      // Limpiar instantáneamente solo el recorrido de la línea para reflejar que se está recalculando
       await prisma.linea.update({
         where: { id },
         data: {
-          ciudades: [],
-          barrios: [],
           recorridoPuntos: []
         }
       });
@@ -821,8 +819,8 @@ const autoCompletarZonasLinea = async (lineaId: string, puntos: {lat: number, ln
     const lineaActual = await prisma.linea.findUnique({ where: { id: lineaId } });
     if (!lineaActual) return;
     
-    const nuevasCiudades = Array.from(ciudades);
-    const nuevosBarrios = Array.from(barrios);
+    const nuevasCiudades = Array.from(new Set([...((lineaActual.ciudades as string[]) || []), ...ciudades]));
+    const nuevosBarrios = Array.from(new Set([...((lineaActual.barrios as string[]) || []), ...barrios]));
     const nuevoRecorrido = recorrido;
 
     // POST-PROCESAMIENTO: Filtro "Sándwich"
