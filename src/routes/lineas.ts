@@ -412,12 +412,17 @@ router.get('/:id/recorrido', async (req: Request, res: Response): Promise<void> 
     }
 
     let parsedPuntos = [];
+    let parsedPuntosVuelta = [];
     if (recorrido && recorrido.puntos) {
       parsedPuntos = typeof recorrido.puntos === 'string' ? JSON.parse(recorrido.puntos as string) : recorrido.puntos;
+    }
+    if (recorrido && recorrido.puntosVuelta) {
+      parsedPuntosVuelta = typeof recorrido.puntosVuelta === 'string' ? JSON.parse(recorrido.puntosVuelta as string) : recorrido.puntosVuelta;
     }
 
     res.json({ 
       puntos: parsedPuntos, 
+      puntosVuelta: parsedPuntosVuelta,
       paradas: linea ? linea.paradas : [],
       actualizadoEn: recorrido?.actualizadoEn ?? null 
     });
@@ -447,7 +452,7 @@ router.get('/:id/recorrido/historial', authMiddleware, async (req: Request, res:
 router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { puntos, paradas } = req.body;
+    const { puntos, puntosVuelta, paradas } = req.body;
     // @ts-ignore
     const usuarioId = req.usuario?.id;
 
@@ -456,10 +461,11 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
       return;
     }
 
+    const puntosVueltaSeguros = Array.isArray(puntosVuelta) ? puntosVuelta : [];
     const paradasSeguras = Array.isArray(paradas) ? paradas : [];
 
     // Validar que todos los puntos tengan lat y lng numéricos
-    for (const p of puntos) {
+    for (const p of [...puntos, ...puntosVueltaSeguros]) {
       if (typeof p.lat !== 'number' || typeof p.lng !== 'number') {
         res.status(400).json({ error: 'Cada punto debe tener lat y lng numéricos' });
         return;
@@ -475,7 +481,9 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
 
     // Consultar el recorrido actual para ver si los puntos cambiaron
     const recorridoActual = await prisma.recorridoGPS.findUnique({ where: { lineaId: id } });
-    const puntosCambiaron = !recorridoActual || JSON.stringify(recorridoActual.puntos) !== JSON.stringify(puntos);
+    const puntosCambiaron = !recorridoActual || 
+      JSON.stringify(recorridoActual.puntos) !== JSON.stringify(puntos) ||
+      JSON.stringify(recorridoActual.puntosVuelta) !== JSON.stringify(puntosVueltaSeguros);
 
     // --- Sincronizar paradas con la tabla Parada ---
     // Obtener paradas existentes en DB
@@ -491,7 +499,13 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
         // Actualizar parada existente
         await prisma.parada.update({
           where: { id: p.id },
-          data: { lat: p.lat, lng: p.lng, nombre: p.nombre || `Parada ${i + 1}` }
+          data: { 
+            lat: p.lat, 
+            lng: p.lng, 
+            nombre: p.nombre || `Parada ${i + 1}`,
+            sentido: p.sentido || 'ida',
+            tipo: p.tipo || 'parada'
+          }
         });
         paradasMantenidas.add(p.id);
       } else {
@@ -501,6 +515,8 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
             lat: p.lat,
             lng: p.lng,
             nombre: p.nombre || `Parada ${i + 1}`,
+            sentido: p.sentido || 'ida',
+            tipo: p.tipo || 'parada',
             lineaId: id
           }
         });
@@ -521,8 +537,19 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
     // Upsert del recorrido GPS (coordenadas)
     const recorrido = await prisma.recorridoGPS.upsert({
       where: { lineaId: id },
-      create: { lineaId: id, puntos, paradas: paradasSeguras, actualizadoPor: usuarioId },
-      update: { puntos, paradas: paradasSeguras, actualizadoPor: usuarioId },
+      create: { 
+        lineaId: id, 
+        puntos, 
+        puntosVuelta: puntosVueltaSeguros, 
+        paradas: paradasSeguras, 
+        actualizadoPor: usuarioId 
+      },
+      update: { 
+        puntos, 
+        puntosVuelta: puntosVueltaSeguros, 
+        paradas: paradasSeguras, 
+        actualizadoPor: usuarioId 
+      },
     });
 
     // Guardar una instantánea en el historial solo si cambió algo de los puntos o paradas
@@ -531,6 +558,7 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
       data: {
         lineaId: id,
         puntos,
+        puntosVuelta: puntosVueltaSeguros,
         paradas: paradasSeguras,
         actualizadoPor: usuarioId,
       }
@@ -548,7 +576,10 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
       });
 
       // Ejecutar autocompletado en background solo si la ruta cambió
-      autoCompletarZonasLinea(id, puntos).catch(err => console.error(err));
+      const todosLosPuntos = [...puntos, ...puntosVueltaSeguros];
+      procesarAutocompletadoCalles(id, todosLosPuntos).catch(err => {
+        console.error('Error procesando autocompletado en background:', err);
+      });
     } else {
       console.log(`[Rutas] Solo se actualizaron las paradas de la línea ${id}, omitiendo autocompletado.`);
     }

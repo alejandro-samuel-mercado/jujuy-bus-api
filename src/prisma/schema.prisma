@@ -67,8 +67,10 @@ model RecorridoGPS {
   id              String   @id @default(uuid())
   lineaId         String   @unique
   linea           Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
-  puntos          Json     @default("[]") // Array de { lat: Float, lng: Float }
-  paradas         Json     @default("[]") // Array de { lat: Float, lng: Float }
+  puntos          Json     @default("[]") // Ida: Array de { lat: Float, lng: Float }
+  paradas         Json     @default("[]") // Ida: Array de { lat: Float, lng: Float }
+  puntosVuelta    Json     @default("[]") // Vuelta: Array de { lat: Float, lng: Float }
+  paradasVuelta   Json     @default("[]") // Vuelta: Array de { lat: Float, lng: Float, tipo?: string }
   actualizadoEn   DateTime @updatedAt
   actualizadoPor  String?  // userId del último que editó
 
@@ -81,6 +83,8 @@ model HistorialRecorrido {
   linea           Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
   puntos          Json     @default("[]")
   paradas         Json     @default("[]")
+  puntosVuelta    Json     @default("[]")
+  paradasVuelta   Json     @default("[]")
   actualizadoPor  String?  // userId del que guardó esta versión
   creadoEn        DateTime @default(now())
 
@@ -218,6 +222,8 @@ model Parada {
   lat         Float
   lng         Float
   nombre      String
+  sentido     String   @default("ida") // "ida" o "vuelta"
+  tipo        String   @default("parada") // "parada", "inicio", "fin"
   lineaId     String
   linea       Linea    @relation(fields: [lineaId], references: [id], onDelete: Cascade)
   favoritos   ParadaFavorita[]
