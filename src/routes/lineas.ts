@@ -577,7 +577,7 @@ router.put('/:id/recorrido', authMiddleware, async (req: Request, res: Response)
 
       // Ejecutar autocompletado en background solo si la ruta cambió
       const todosLosPuntos = [...puntos, ...puntosVueltaSeguros];
-      procesarAutocompletadoCalles(id, todosLosPuntos).catch(err => {
+      autoCompletarZonasLinea(id, todosLosPuntos).catch((err: any) => {
         console.error('Error procesando autocompletado en background:', err);
       });
     } else {
