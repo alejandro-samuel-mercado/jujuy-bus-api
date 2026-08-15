@@ -11,9 +11,9 @@ const lineaSchema = z.object({
   nombre: z.string().optional(),
   empresaId: z.string().uuid('ID de empresa inválido'),
   fotoPortada: z.string().optional(),
-  ciudades: z.array(z.string()).optional().default([]),
-  barrios: z.array(z.string()).optional().default([]),
-  recorridoPuntos: z.array(z.string()).optional().default([]),
+  ciudades: z.array(z.string()).optional(),
+  barrios: z.array(z.string()).optional(),
+  recorridoPuntos: z.array(z.string()).optional(),
 });
 
 // GET /lineas — listar todas con su empresa y grupo de chat
