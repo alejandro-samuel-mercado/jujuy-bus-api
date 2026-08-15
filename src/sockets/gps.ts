@@ -125,7 +125,7 @@ export function setupGpsSockets(io: Server) {
       const ruta = await getRuta(lineaId);
       if (ruta.length > 0) {
         const dist = getDistanciaARuta({ lat, lng }, ruta);
-        if (dist > 400) {
+        if (dist > 200) {
           console.log(`[GPS] Desconectando a ${usuario.nombre} por desvío de ${Math.round(dist)}m`);
           socket.emit('error_gps', 'Te has alejado demasiado del recorrido de la línea.');
           _quitarUsuarioDeLinea(lineaId, usuario.id, io);
