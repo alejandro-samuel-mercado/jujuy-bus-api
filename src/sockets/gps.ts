@@ -27,14 +27,16 @@ interface UsuarioABordo {
 
 // Mapa en memoria: lineaId -> lista de usuarios a bordo
 const usuariosABordo = new Map<string, UsuarioABordo[]>();
-const cacheRecorridos = new Map<string, { lat: number; lng: number }[]>();
+const cacheRecorridos = new Map<string, { ida: any[], vuelta: any[] }>();
 
 async function getRuta(lineaId: string) {
   if (cacheRecorridos.has(lineaId)) return cacheRecorridos.get(lineaId)!;
   const r = await prisma.recorridoGPS.findUnique({ where: { lineaId } });
-  const pts = r && Array.isArray(r.puntos) ? r.puntos as any[] : [];
-  cacheRecorridos.set(lineaId, pts);
-  return pts;
+  const ida = r && Array.isArray(r.puntos) ? r.puntos as any[] : [];
+  const vuelta = r && Array.isArray(r.puntosVuelta) ? r.puntosVuelta as any[] : [];
+  const rutas = { ida, vuelta };
+  cacheRecorridos.set(lineaId, rutas);
+  return rutas;
 }
 
 // Calcula el centroide (promedio) de las coordenadas de todos los usuarios a bordo de una línea
@@ -122,9 +124,12 @@ export function setupGpsSockets(io: Server) {
       const coordenada: Coordenada = { lat, lng, timestamp: Date.now() };
 
       // Validar distancia a la ruta
-      const ruta = await getRuta(lineaId);
-      if (ruta.length > 0) {
-        const dist = getDistanciaARuta({ lat, lng }, ruta);
+      const rutas = await getRuta(lineaId);
+      if (rutas.ida.length > 0 || rutas.vuelta.length > 0) {
+        const distIda = rutas.ida.length > 0 ? getDistanciaARuta({ lat, lng }, rutas.ida) : Infinity;
+        const distVuelta = rutas.vuelta.length > 0 ? getDistanciaARuta({ lat, lng }, rutas.vuelta) : Infinity;
+        const dist = Math.min(distIda, distVuelta);
+        
         if (dist > 200) {
           console.log(`[GPS] Desconectando a ${usuario.nombre} por desvío de ${Math.round(dist)}m`);
           socket.emit('error_gps', 'Te has alejado demasiado del recorrido de la línea.');
