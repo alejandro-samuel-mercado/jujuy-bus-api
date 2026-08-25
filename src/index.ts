@@ -9,6 +9,7 @@ import lineasRoutes from './routes/lineas';
 import usuariosRoutes from './routes/usuarios';
 import uploadRoutes from './routes/upload';
 import noticiasRoutes from './routes/noticias';
+import systemRoutes from './routes/system';
 import { setupChatSockets } from './sockets/chat';
 import { setupGpsSockets } from './sockets/gps';
 import path from 'path';
@@ -38,9 +39,11 @@ app.use('/empresas', empresasRoutes);
 app.use('/lineas', lineasRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/noticias', noticiasRoutes);
+app.use('/system', systemRoutes);
 
 // Servir archivos estáticos de subidas
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+app.use('/apks', express.static(path.join(__dirname, '../public/apks')));
 
 // Configurar sockets
 setupChatSockets(io);

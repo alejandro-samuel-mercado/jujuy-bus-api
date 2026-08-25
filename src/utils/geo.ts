@@ -44,3 +44,35 @@ export function getDistanciaARuta(punto: Punto, ruta: Punto[]): number {
   }
   return minDist;
 }
+
+// Snapping: devuelve la distancia y las coordenadas exactas de la proyección sobre la ruta
+export function getSnappingPunto(punto: Punto, ruta: Punto[]): { dist: number, proyeccion: Punto } | null {
+  if (!ruta || ruta.length === 0) return null;
+  if (ruta.length === 1) return { dist: getDistancia(punto, ruta[0]), proyeccion: ruta[0] };
+
+  let minDist = Infinity;
+  let bestProyeccion = punto;
+
+  for (let i = 0; i < ruta.length - 1; i++) {
+    const v = ruta[i];
+    const w = ruta[i+1];
+
+    const l2 = Math.pow(v.lat - w.lat, 2) + Math.pow(v.lng - w.lng, 2);
+    let proyeccion = v;
+    if (l2 !== 0) {
+      let t = ((punto.lat - v.lat) * (w.lat - v.lat) + (punto.lng - v.lng) * (w.lng - v.lng)) / l2;
+      t = Math.max(0, Math.min(1, t));
+      proyeccion = {
+        lat: v.lat + t * (w.lat - v.lat),
+        lng: v.lng + t * (w.lng - v.lng)
+      };
+    }
+    const dist = getDistancia(punto, proyeccion);
+    
+    if (dist < minDist) {
+      minDist = dist;
+      bestProyeccion = proyeccion;
+    }
+  }
+  return { dist: minDist, proyeccion: bestProyeccion };
+}

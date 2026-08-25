@@ -1,20 +1,16 @@
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
-import { getDistanciaARuta, getDistancia } from '../utils/geo';
+import prisma from '../prisma/client';
+import { getDistancia, getSnappingPunto, Punto } from '../utils/geo';
 
-const prisma = new PrismaClient();
+interface Coordenada extends Punto {
+  timestamp: number;
+}
 
 interface JwtPayload {
   id: string;
   email: string;
   nombre: string;
-}
-
-interface Coordenada {
-  lat: number;
-  lng: number;
-  timestamp: number;
 }
 
 interface UsuarioABordo {
@@ -106,9 +102,10 @@ export function setupGpsSockets(io: Server) {
       socket.leave(`linea:${lineaId}`);
     });
 
-    // ─── Activar modo "A Bordo" ───────────────────────────────────────────────
+    // ─── Unirse / Compartir Viaje ─────────────────────────────────────────────
     socket.on('subir_al_colectivo', (lineaId: string) => {
       socket.data.lineaActiva = lineaId;
+      socket.data.tiempoInicioTracking = Date.now();
       socket.join(`linea:${lineaId}`);
       console.log(`[GPS] ${usuario.nombre} subió al colectivo ${lineaId}`);
       // Notificar a los observadores que hay un pasajero más
@@ -126,16 +123,38 @@ export function setupGpsSockets(io: Server) {
       // Validar distancia a la ruta
       const rutas = await getRuta(lineaId);
       if (rutas.ida.length > 0 || rutas.vuelta.length > 0) {
-        const distIda = rutas.ida.length > 0 ? getDistanciaARuta({ lat, lng }, rutas.ida) : Infinity;
-        const distVuelta = rutas.vuelta.length > 0 ? getDistanciaARuta({ lat, lng }, rutas.vuelta) : Infinity;
-        const dist = Math.min(distIda, distVuelta);
+        const resultIda = rutas.ida.length > 0 ? getSnappingPunto({ lat, lng }, rutas.ida) : null;
+        const resultVuelta = rutas.vuelta.length > 0 ? getSnappingPunto({ lat, lng }, rutas.vuelta) : null;
         
-        if (dist > 200) {
-          console.log(`[GPS] Desconectando a ${usuario.nombre} por desvío de ${Math.round(dist)}m`);
-          socket.emit('error_gps', 'Te has alejado demasiado del recorrido de la línea.');
-          _quitarUsuarioDeLinea(lineaId, usuario.id, io);
-          socket.data.lineaActiva = null;
-          return;
+        let bestDist = Infinity;
+        let snappedCoord = { lat, lng };
+
+        if (resultIda && resultIda.dist < bestDist) {
+          bestDist = resultIda.dist;
+          snappedCoord = resultIda.proyeccion;
+        }
+        if (resultVuelta && resultVuelta.dist < bestDist) {
+          bestDist = resultVuelta.dist;
+          snappedCoord = resultVuelta.proyeccion;
+        }
+        
+        if (bestDist > 200) {
+          const gracePeriod = 20000; // 20 segundos de gracia
+          const tiempoDesdeInicio = Date.now() - (socket.data.tiempoInicioTracking || 0);
+
+          if (tiempoDesdeInicio > gracePeriod) {
+            console.log(`[GPS] Desconectando a ${usuario.nombre} por desvío de ${Math.round(bestDist)}m`);
+            socket.emit('error_gps', 'Te has alejado demasiado del recorrido de la línea.');
+            _quitarUsuarioDeLinea(lineaId, usuario.id, io);
+            socket.data.lineaActiva = null;
+            return;
+          } else {
+            console.log(`[GPS] ${usuario.nombre} desviado (${Math.round(bestDist)}m) pero en periodo de gracia.`);
+          }
+        } else {
+          // Snap! Aplicamos las coordenadas magnéticas
+          coordenada.lat = snappedCoord.lat;
+          coordenada.lng = snappedCoord.lng;
         }
       }
 
